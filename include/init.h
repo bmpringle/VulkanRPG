@@ -1,3 +1,19 @@
+/*
+
+NOTE:
+
+This was created in significant part by following vulkan-tutorial.com.
+Large parts of it have been modified in their structure, but it
+should still be noted that it was created with frequent reference and 
+(in the case of a large part of the boilerplate structures), copy/paste
+before making any necessary modifications.
+
+There are also some helper functions that have undergone no modification at all
+from their versions at vulkan-tutorial.com. An example of this is readFile, since
+it is simple and needed no modifications for my use case.
+
+*/
+
 #define VK_ENABLE_BETA_EXTENSIONS
 #include "volk/volk.h"
 #include <SDL2/SDL.h>
@@ -309,7 +325,6 @@ void get_vk_devices_and_queues(VkInstance instance, VkSurfaceKHR surface, VkPhys
     }
 }
 
-// From vulkan-tutorial.com
 VkSurfaceFormatKHR chooseSwapSurfaceFormat(const std::vector<VkSurfaceFormatKHR>& availableFormats) {
     for (const auto& availableFormat : availableFormats) {
         if (availableFormat.format == VK_FORMAT_B8G8R8A8_SRGB && availableFormat.colorSpace == VK_COLOR_SPACE_SRGB_NONLINEAR_KHR) {
@@ -320,7 +335,6 @@ VkSurfaceFormatKHR chooseSwapSurfaceFormat(const std::vector<VkSurfaceFormatKHR>
     return availableFormats[0];
 }
 
-// From vulkan-tutorial.com
 VkPresentModeKHR chooseSwapPresentMode(const std::vector<VkPresentModeKHR>& availablePresentModes) {
     for (const auto& availablePresentMode : availablePresentModes) {
         if (availablePresentMode == VK_PRESENT_MODE_MAILBOX_KHR) {
@@ -331,7 +345,6 @@ VkPresentModeKHR chooseSwapPresentMode(const std::vector<VkPresentModeKHR>& avai
     return VK_PRESENT_MODE_FIFO_KHR;
 }
 
-// From vulkan-tutorial.com
 VkExtent2D chooseSwapExtent(const VkSurfaceCapabilitiesKHR& capabilities, SDL_Window* window) {
     if (capabilities.currentExtent.width != std::numeric_limits<uint32_t>::max()) {
         return capabilities.currentExtent;
@@ -444,7 +457,6 @@ void get_vk_swapchain_and_images(SDL_Window* window, VkSurfaceKHR surface, VkPhy
     }
 }
 
-// From vulkan-tutorial.com
 std::vector<char> readFile(const std::string& filename) {
     std::ifstream file(filename, std::ios::ate | std::ios::binary);
 
@@ -462,7 +474,6 @@ std::vector<char> readFile(const std::string& filename) {
     return buffer;
 }
 
-// From vulkan-tutorial.com
 VkShaderModule createShaderModule(const std::vector<char>& code, VkDevice device) {
     VkShaderModuleCreateInfo createInfo{};
     createInfo.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
@@ -477,7 +488,6 @@ VkShaderModule createShaderModule(const std::vector<char>& code, VkDevice device
     return shaderModule;
 }
 
-// From vulkan-tutorial.com
 VkPipelineLayout create_vk_pipeline_layout(VkDevice device) {
     VkPipelineLayout pipeline_layout;
 
@@ -495,7 +505,6 @@ VkPipelineLayout create_vk_pipeline_layout(VkDevice device) {
     return pipeline_layout;
 }
 
-// From vulkan-tutorial.com
 VkRenderPass create_vk_render_pass(VkDevice device, VkFormat swapchain_image_format) {
     VkAttachmentDescription colorAttachment{};
     colorAttachment.format = swapchain_image_format;
@@ -574,7 +583,6 @@ template <class VertexType, class ...VertexTypes> std::vector<VkVertexInputBindi
     return binding_descriptions;
 }
 
-// From vulkan-tutorial.com
 // Usage note: pass all vertex types that need attribute / binding descriptors as template arguments to the function.
 // Make sure to implement VetexType::get_attribute_description and VertexType::get_binding_description first.
 template <class ...VertexTypes>
@@ -816,7 +824,6 @@ std::tuple<VkBuffer, VkDeviceMemory> get_vk_vertex_buffer(VkPhysicalDevice physi
     VkPhysicalDeviceMemoryProperties memory_properties;
     vkGetPhysicalDeviceMemoryProperties(physical_device, &memory_properties);
 
-    // From vulkan-tutorial.com
     for (uint32_t i = 0; i < memory_properties.memoryTypeCount; i++) {
         if ((type_filter & (1 << i)) && (memory_properties.memoryTypes[i].propertyFlags & required_properties) == required_properties) {
             chosen_memory_type = i;
