@@ -1,0 +1,1 @@
+sudo ./InstallVulkan.app/Contents/MacOS/InstallVulkan --root "$PWD/SDK" --accept-licenses --default-answer --confirm-command install com.lunarg.vulkan.core com.lunarg.vulkan.sdl2 com.lunarg.vulkan.glm com.lunarg.vulkan.volk com.lunarg.vulkan.vma

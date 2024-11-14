@@ -1,0 +1,6 @@
+SDK/**
+*.spv
+*.app
+*.dylib
+bin/**
+*.o

@@ -1,0 +1,1 @@
+source ./SDK/setup-env.sh
