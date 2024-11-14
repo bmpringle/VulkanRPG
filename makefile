@@ -6,3 +6,7 @@ default:
 
 	glslc shaders/src/shader_2d.vert -o shaders/bin/shader_2d_vert.spv
 	glslc shaders/src/shader_2d.frag -o shaders/bin/shader_2d_frag.spv
+
+clean:
+	rm -rf obj/*
+	rm -rf bin/*
