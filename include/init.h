@@ -563,7 +563,7 @@ std::vector<VkVertexInputAttributeDescription> get_all_attribute_descriptions(ty
 }
 
 template <class VertexType, class ...VertexTypes> std::vector<VkVertexInputAttributeDescription> get_all_attribute_descriptions() {
-    std::vector<VkVertexInputAttributeDescription> attribute_descriptions = {VertexType::get_attribute_description()};
+    std::vector<VkVertexInputAttributeDescription> attribute_descriptions = VertexType::get_attribute_description();
     for (VkVertexInputAttributeDescription attribute_description : get_all_attribute_descriptions<VertexTypes...>()) {
         attribute_descriptions.push_back(attribute_description);
     }
@@ -648,7 +648,7 @@ VkPipeline create_vk_graphics_pipeline(VkDevice device, VkPipelineLayout pipelin
     rasterizer.rasterizerDiscardEnable = VK_FALSE;
     rasterizer.polygonMode = VK_POLYGON_MODE_FILL;
     rasterizer.lineWidth = 1.0f;
-    rasterizer.cullMode = VK_CULL_MODE_BACK_BIT;
+    rasterizer.cullMode = VK_CULL_MODE_NONE;
     rasterizer.frontFace = VK_FRONT_FACE_CLOCKWISE;
 
     rasterizer.depthBiasEnable = VK_FALSE;
@@ -764,11 +764,11 @@ std::vector<VkFramebuffer> get_vk_swapchain_framebuffers(VkDevice device, std::v
     return swapchain_framebuffers;
 }
 
-VkCommandPool get_vk_command_pool(VkDevice device, int graphics_queue_index) {
+VkCommandPool get_vk_command_pool(VkDevice device, int queue_index, int command_pool_flags) {
     VkCommandPoolCreateInfo poolInfo{};
     poolInfo.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
-    poolInfo.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
-    poolInfo.queueFamilyIndex = graphics_queue_index;
+    poolInfo.flags = command_pool_flags;
+    poolInfo.queueFamilyIndex = queue_index;
 
     VkCommandPool command_pool;
 
@@ -795,29 +795,28 @@ std::vector<VkCommandBuffer> get_vk_command_buffers(VkDevice device, VkCommandPo
     return command_buffers;
 }
 
-template<class Vertex>
-std::tuple<VkBuffer, VkDeviceMemory> get_vk_vertex_buffer(VkPhysicalDevice physical_device, VkDevice logical_device, std::vector<Vertex> vertices, uint32_t graphics_queue_index) {
-    VkBuffer vertex_buffer;
-    VkDeviceMemory vertex_buffer_memory;
+std::tuple<VkBuffer, VkDeviceMemory> get_vk_buffer(VkPhysicalDevice physical_device, VkDevice logical_device, VkBufferUsageFlags buffer_usage_flags, VkSharingMode buffer_sharing_mode, 
+                                                        std::size_t buffer_size, uint32_t buffer_queue_index, int required_memory_properties) {
+    VkBuffer buffer;
+    VkDeviceMemory buffer_memory;
 
     VkBufferCreateInfo buffer_create_info {};
     buffer_create_info.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
-    buffer_create_info.usage = VK_BUFFER_USAGE_VERTEX_BUFFER_BIT;
+    buffer_create_info.usage = buffer_usage_flags;
     buffer_create_info.queueFamilyIndexCount = 1;
-    buffer_create_info.pQueueFamilyIndices = &graphics_queue_index;
-    buffer_create_info.size = sizeof(Vertex) * vertices.size();
-    buffer_create_info.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+    buffer_create_info.pQueueFamilyIndices = &buffer_queue_index;
+    buffer_create_info.size = buffer_size;
+    buffer_create_info.sharingMode = buffer_sharing_mode;
     
-    if (VkResult result = vkCreateBuffer(logical_device, &buffer_create_info, nullptr, &vertex_buffer); result != VK_SUCCESS) {
+    if (VkResult result = vkCreateBuffer(logical_device, &buffer_create_info, nullptr, &buffer); result != VK_SUCCESS) {
         throw std::runtime_error("Could not create vertex buffer: " + std::string(string_VkResult(result)));
     }
 
     // Find the best type of available memory for VkBuffer.
     VkMemoryRequirements memory_requirements;
-    vkGetBufferMemoryRequirements(logical_device, vertex_buffer, &memory_requirements);
+    vkGetBufferMemoryRequirements(logical_device, buffer, &memory_requirements);
 
     uint32_t type_filter = memory_requirements.memoryTypeBits;
-    uint32_t required_properties = VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
 
     int chosen_memory_type = -1;
 
@@ -825,7 +824,7 @@ std::tuple<VkBuffer, VkDeviceMemory> get_vk_vertex_buffer(VkPhysicalDevice physi
     vkGetPhysicalDeviceMemoryProperties(physical_device, &memory_properties);
 
     for (uint32_t i = 0; i < memory_properties.memoryTypeCount; i++) {
-        if ((type_filter & (1 << i)) && (memory_properties.memoryTypes[i].propertyFlags & required_properties) == required_properties) {
+        if ((type_filter & (1 << i)) && (memory_properties.memoryTypes[i].propertyFlags & required_memory_properties) == required_memory_properties) {
             chosen_memory_type = i;
             break;
         }
@@ -840,16 +839,74 @@ std::tuple<VkBuffer, VkDeviceMemory> get_vk_vertex_buffer(VkPhysicalDevice physi
     allocInfo.allocationSize = memory_requirements.size;
     allocInfo.memoryTypeIndex = chosen_memory_type;
 
-    if (VkResult result = vkAllocateMemory(logical_device, &allocInfo, nullptr, &vertex_buffer_memory); result != VK_SUCCESS) {
+    if (VkResult result = vkAllocateMemory(logical_device, &allocInfo, nullptr, &buffer_memory); result != VK_SUCCESS) {
         throw std::runtime_error("Could not allocate vertex buffer memory: " + std::string(string_VkResult(result)));
     }
 
-    vkBindBufferMemory(logical_device, vertex_buffer, vertex_buffer_memory, 0);
+    vkBindBufferMemory(logical_device, buffer, buffer_memory, 0);
+    return std::tie(buffer, buffer_memory);
+}
 
-    void* data;
-    vkMapMemory(logical_device, vertex_buffer_memory, 0, buffer_create_info.size, 0, &data);
-    memcpy(data, vertices.data(), (size_t) buffer_create_info.size);
-    vkUnmapMemory(logical_device, vertex_buffer_memory);
+void vk_cpy_host_to_gpu(VkDevice logical_device, const void* src, VkDeviceMemory memory, VkDeviceSize map_size, VkDeviceSize map_offset = 0, VkMemoryMapFlags map_flags = 0) {
+    void* host_memory_pointer;
+    vkMapMemory(logical_device, memory, map_offset, map_size, map_flags, &host_memory_pointer);
+    memcpy(host_memory_pointer, src, (size_t) map_size);
+    vkUnmapMemory(logical_device, memory);
+}
+
+void vk_cpy_buffer(VkQueue queue, VkCommandPool command_pool, VkDevice logical_device, VkBuffer src, VkBuffer dst, VkDeviceSize size) {
+    // Get a command buffer
+    VkCommandBuffer command_buffer = get_vk_command_buffers(logical_device, command_pool, 1).front();
+
+    // Begin the command buffer
+    VkCommandBufferBeginInfo beginInfo{};
+    beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+    beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+
+    vkBeginCommandBuffer(command_buffer, &beginInfo);
+
+    // Execute the copy command
+    VkBufferCopy copyRegion{};
+    copyRegion.srcOffset = 0; // Optional
+    copyRegion.dstOffset = 0; // Optional
+    copyRegion.size = size;
+
+    vkCmdCopyBuffer(command_buffer, src, dst, 1, &copyRegion);
+
+    // End the command buffer
+
+    vkEndCommandBuffer(command_buffer);
+
+    // Submit the command buffer to its queue
+
+    VkSubmitInfo submitInfo{};
+    submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+    submitInfo.commandBufferCount = 1;
+    submitInfo.pCommandBuffers = &command_buffer;
+
+    vkQueueSubmit(queue, 1, &submitInfo, VK_NULL_HANDLE);
+    vkQueueWaitIdle(queue);
+
+    // Once the copy is done, free the command buffer
+
+    vkFreeCommandBuffers(logical_device, command_pool, 1, &command_buffer);
+}
+
+template<class Vertex>
+std::tuple<VkBuffer, VkDeviceMemory> get_vk_vertex_buffer(VkPhysicalDevice physical_device, VkDevice logical_device, VkQueueWrapper transfer_queue, VkCommandPool transfer_command_pool, std::vector<Vertex> vertices) {
+    auto [vertex_staging_buffer, vertex_staging_buffer_memory] = get_vk_buffer(physical_device, logical_device, VK_BUFFER_USAGE_TRANSFER_SRC_BIT | VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, 
+                                                                    VK_SHARING_MODE_EXCLUSIVE, sizeof(Vertex) * vertices.size(), transfer_queue.queue_index, 
+                                                                    VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+    vk_cpy_host_to_gpu(logical_device, vertices.data(), vertex_staging_buffer_memory, sizeof(Vertex) * vertices.size());
+
+    auto [vertex_buffer, vertex_buffer_memory] = get_vk_buffer(physical_device, logical_device, VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, 
+                                                                    VK_SHARING_MODE_EXCLUSIVE, sizeof(Vertex) * vertices.size(), transfer_queue.queue_index, 
+                                                                    VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+
+    vk_cpy_buffer(transfer_queue.queue, transfer_command_pool, logical_device, vertex_staging_buffer, vertex_buffer, sizeof(Vertex) * vertices.size());
+
+    vkDestroyBuffer(logical_device, vertex_staging_buffer, nullptr);
+    vkFreeMemory(logical_device, vertex_staging_buffer_memory, nullptr);
 
     return std::tie(vertex_buffer, vertex_buffer_memory);
 }
@@ -858,31 +915,100 @@ std::tuple<VkBuffer, VkDeviceMemory> get_vk_vertex_buffer(VkPhysicalDevice physi
 
 struct Vertex {
     glm::vec2 pos;
+    glm::vec3 color;
 
-    Vertex() : pos(glm::vec2(0, 0)) {
-
-    }
-
-    Vertex(glm::vec2 _pos) : pos(_pos) {
+    Vertex() : pos(glm::vec2(0, 0)), color(glm::vec3(0, 0, 0)) {
 
     }
 
-    Vertex(float x, float y) : pos(glm::vec2(x, y)) {
+    Vertex(glm::vec2 _pos) : pos(_pos), color(glm::vec3(0, 0, 0)) {
 
     }
 
-    static VkVertexInputAttributeDescription get_attribute_description() {
+    Vertex(glm::vec3 _color) : pos(glm::vec2(0, 0)), color(_color) {
+
+    }
+
+    Vertex(glm::vec2 _pos, glm::vec3 _color) : pos(_pos), color(_color) {
+
+    }
+
+    Vertex(float x, float y) : pos(glm::vec2(x, y)), color(glm::vec3(0, 0, 0)) {
+
+    }
+
+    Vertex(float r, float g, float b) : pos(glm::vec2(0, 0)), color(glm::vec3(r, g, b)) {
+
+    }
+
+    Vertex(float x, float y, float r, float g, float b) : pos(glm::vec2(x, y)), color(glm::vec3(r, g, b)) {
+
+    }
+
+    Vertex(float x, float y, glm::vec3 _color) : pos(glm::vec2(x, y)), color(_color) {
+
+    }
+
+    Vertex(glm::vec2 _pos, float r, float g, float b) : pos(_pos), color(glm::vec3(r, g, b)) {
+
+    }
+
+    static std::vector<VkVertexInputAttributeDescription> get_attribute_description() {
         // Create vertex attribute and binding descriptions.
-        VkVertexInputAttributeDescription desc {};
-        desc.location = 0;
-        desc.format = VK_FORMAT_R32G32_SFLOAT;
-        return desc;
+        VkVertexInputAttributeDescription desc0 {};
+        desc0.binding = 0;
+        desc0.location = 0;
+        desc0.offset = offsetof(Vertex, pos);
+        desc0.format = VK_FORMAT_R32G32_SFLOAT;
+
+        VkVertexInputAttributeDescription desc1 {};
+        desc1.binding = 0;
+        desc1.location = 1;
+        desc1.offset = offsetof(Vertex, color);
+        desc1.format = VK_FORMAT_R32G32B32_SFLOAT;
+        return {desc0, desc1};
     }
 
     static VkVertexInputBindingDescription get_binding_description() {
         VkVertexInputBindingDescription desc {};
+        desc.binding = 0;
         desc.inputRate = VK_VERTEX_INPUT_RATE_VERTEX;
         desc.stride = sizeof(Vertex);
+        return desc;
+    }
+};
+
+struct ObjectData {
+    glm::vec2 pos;
+
+    ObjectData() : pos(glm::vec2(0, 0)) {
+
+    }
+
+    ObjectData(glm::vec2 _pos) : pos(_pos) {
+
+    }
+
+    ObjectData(float x, float y) : pos(glm::vec2(x, y)) {
+
+    }
+
+    static std::vector<VkVertexInputAttributeDescription> get_attribute_description() {
+        // Create vertex attribute and binding descriptions.
+        VkVertexInputAttributeDescription desc0 {};
+        desc0.binding = 1;
+        desc0.location = 2;
+        desc0.offset = offsetof(ObjectData, pos);
+        desc0.format = VK_FORMAT_R32G32_SFLOAT;
+
+        return {desc0};
+    }
+
+    static VkVertexInputBindingDescription get_binding_description() {
+        VkVertexInputBindingDescription desc {};
+        desc.binding = 1;
+        desc.inputRate = VK_VERTEX_INPUT_RATE_INSTANCE;
+        desc.stride = sizeof(ObjectData);
         return desc;
     }
 };
@@ -893,11 +1019,13 @@ template<class Vertex>
 struct VertexBufferBacked {
     VkBuffer buffer;
     VkDeviceMemory memory;
+    int length;
 
-    VertexBufferBacked<Vertex>(VkPhysicalDevice physical_device, VkDevice logical_device, uint32_t graphics_queue_index, std::vector<Vertex> data) {
-        auto [buf, mem] = get_vk_vertex_buffer<Vertex>(physical_device, logical_device, data, graphics_queue_index);
+    VertexBufferBacked<Vertex>(VkPhysicalDevice physical_device, VkDevice logical_device, VkQueueWrapper transfer_queue, VkCommandPool transfer_command_pool, std::vector<Vertex> data) {
+        auto [buf, mem] = get_vk_vertex_buffer<Vertex>(physical_device, logical_device, transfer_queue, transfer_command_pool, data);
         buffer = buf;
         memory = mem;
+        length = data.size();
     }
 
     void destroy(VkDevice device) {
@@ -945,7 +1073,7 @@ struct GraphicsPipeline {
         vertex_shader_module(createShaderModule(readFile(vertex_shader_loc), device)), fragment_shader_module(createShaderModule(readFile(fragment_shader_loc), device)) {
         render_pass = create_vk_render_pass(device, swapchain_format);
         pipeline_layout = create_vk_pipeline_layout(device);
-        graphics_pipeline = create_vk_graphics_pipeline<Vertex>(device, pipeline_layout, render_pass, vertex_shader_module, fragment_shader_module, extent);
+        graphics_pipeline = create_vk_graphics_pipeline<Vertex, ObjectData>(device, pipeline_layout, render_pass, vertex_shader_module, fragment_shader_module, extent);
     } 
 };
 
@@ -984,9 +1112,11 @@ struct VkContext {
     VkFormat swapchain_format;
     VkExtent2D swapchain_extent;
     GraphicsPipeline graphics_pipeline;
-    VkCommandPool command_pool;
-
+    
     const int MAX_FRAMES_IN_FLIGHT = 2;
+
+    VkCommandPool command_pool;
+    VkCommandPool transient_command_pool;
 
     std::vector<VkCommandBuffer> command_buffers;
     std::vector<VkFence> command_buffer_fences;
@@ -994,6 +1124,7 @@ struct VkContext {
     std::vector<VkSemaphore> image_done_rendering_semaphores;
 
     std::vector<VertexBufferBacked<Vertex>> vertex_buffers;
+    std::vector<VertexBufferBacked<ObjectData>> object_position_buffers;
 
     VkContext(const VkContext&) = delete;
 
@@ -1024,7 +1155,8 @@ struct VkContext {
         swapchain_framebuffers = get_vk_swapchain_framebuffers(logical_device, image_views, graphics_pipeline.render_pass, swapchain_extent);
 
         // Create command pool.
-        command_pool = get_vk_command_pool(logical_device, get_graphics_queue_index());
+        command_pool = get_vk_command_pool(logical_device, get_graphics_queue_index(), VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT);
+        transient_command_pool = get_vk_command_pool(logical_device, get_graphics_queue_index(), VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT);
 
         // Create command buffer.
         command_buffers = get_vk_command_buffers(logical_device, command_pool, MAX_FRAMES_IN_FLIGHT);
@@ -1034,8 +1166,13 @@ struct VkContext {
     }
 
     int create_vertex_buffer(std::vector<Vertex> vertex_data) {
-        vertex_buffers.push_back(VertexBufferBacked<Vertex>(physical_device, logical_device, get_graphics_queue_index(), vertex_data));
+        vertex_buffers.push_back(VertexBufferBacked<Vertex>(physical_device, logical_device, queue_map["graphics_queue"], transient_command_pool, vertex_data));
         return vertex_buffers.size() - 1;
+    }
+
+    int create_object_position_buffer(std::vector<ObjectData> object_position_data) {
+        object_position_buffers.push_back(VertexBufferBacked<ObjectData>(physical_device, logical_device, queue_map["graphics_queue"], transient_command_pool, object_position_data));
+        return object_position_buffers.size() - 1;
     }
 
     void rebuild_swapchain() {
@@ -1060,7 +1197,11 @@ struct VkContext {
         for (VertexBufferBacked vertex_buffer : vertex_buffers) {
             vertex_buffer.destroy(logical_device);
         }
+        for (VertexBufferBacked object_position_buffer : object_position_buffers) {
+            object_position_buffer.destroy(logical_device);
+        }
         vkDestroyCommandPool(logical_device, command_pool, nullptr);
+        vkDestroyCommandPool(logical_device, transient_command_pool, nullptr);
         graphics_pipeline.vk_destroy(logical_device);
         vk_destroy_swapchain();
         for (int i = 0; i < MAX_FRAMES_IN_FLIGHT; ++i) {

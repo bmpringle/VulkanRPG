@@ -1,7 +1,7 @@
 #include <iostream>
 #include <init.h>
 
-void record_command_buffer(std::shared_ptr<VkContext> context, int image_index, int frame, int buffer_id, int buffer_length) {
+void record_command_buffer(std::shared_ptr<VkContext> context, int image_index, int frame, int vbuffer_id, int obuffer_id) {
     VkCommandBufferBeginInfo beginInfo{};
     beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
     beginInfo.flags = 0; // Optional
@@ -19,7 +19,7 @@ void record_command_buffer(std::shared_ptr<VkContext> context, int image_index, 
     renderPassInfo.renderArea.offset = {0, 0};
     renderPassInfo.renderArea.extent = context->swapchain_extent;
 
-    VkClearValue clearColor = {{{0.0f, 0.0f, 0.0f, 1.0f}}};
+    VkClearValue clearColor = {{{1.0f, 0.0f, 0.0f, 1.0f}}};
     renderPassInfo.clearValueCount = 1;
     renderPassInfo.pClearValues = &clearColor;
 
@@ -41,11 +41,11 @@ void record_command_buffer(std::shared_ptr<VkContext> context, int image_index, 
     scissor.extent = context->swapchain_extent;
     vkCmdSetScissor(context->command_buffers[frame], 0, 1, &scissor);
 
-    VkBuffer vertexBuffers[] = {context->vertex_buffers[buffer_id].buffer};
-    VkDeviceSize offsets[] = {0};
-    vkCmdBindVertexBuffers(context->command_buffers[frame], 0, 1, vertexBuffers, offsets);
+    VkBuffer vertexBuffers[] = {context->vertex_buffers[vbuffer_id].buffer, context->object_position_buffers[obuffer_id].buffer};
+    VkDeviceSize offsets[] = {0, 0};
+    vkCmdBindVertexBuffers(context->command_buffers[frame], 0, 2, vertexBuffers, offsets);
 
-    vkCmdDraw(context->command_buffers[frame], buffer_length, 1, 0, 0);
+    vkCmdDraw(context->command_buffers[frame], context->vertex_buffers[vbuffer_id].length, context->object_position_buffers[vbuffer_id].length, 0, 0);
 
     vkCmdEndRenderPass(context->command_buffers[frame]);
 
@@ -57,7 +57,7 @@ void record_command_buffer(std::shared_ptr<VkContext> context, int image_index, 
 bool framebuffer_resized_flag = false;
 int current_frame = 0;
 
-void draw_frame(std::shared_ptr<VkContext> context, int buffer_id, int buffer_length) {
+void draw_frame(std::shared_ptr<VkContext> context, int vbuffer_id, int obuffer_id) {
     vkWaitForFences(context->logical_device, 1, &context->command_buffer_fences[current_frame], VK_TRUE, UINT64_MAX);
 
     // Get the next image;
@@ -76,7 +76,7 @@ void draw_frame(std::shared_ptr<VkContext> context, int buffer_id, int buffer_le
 
     // Record command buffer.
     vkResetCommandBuffer(context->command_buffers[current_frame], 0);
-    record_command_buffer(context, image_index, current_frame, buffer_id, buffer_length);
+    record_command_buffer(context, image_index, current_frame, vbuffer_id, obuffer_id);
 
     // Submit graphics queue.
     VkSubmitInfo info {};
@@ -115,13 +115,18 @@ int main() {
     std::shared_ptr<VkContext> vk_context = std::make_shared<VkContext>();
 
     std::vector<Vertex> vertex_data = {
-        Vertex(0.875, 0.6496), Vertex(0.125, 0.6496), Vertex(0.5, 0), 
-        Vertex(-0.125, 0.6496), Vertex(-0.875, 0.6496), Vertex(-0.5, 0),
-        Vertex(0.375, 0), Vertex(0, 0.6496), Vertex(-0.375, 0),
-        Vertex(0, -0.6496 - 0.125), Vertex(0.375, -0.125), Vertex(-0.375, -0.125),
+        Vertex(0, 0, 0, 255, 0), Vertex(10, 10, 0, 255, 0), Vertex(0, 10, 0, 255, 0),
+        Vertex(0, 0, 0, 255, 0), Vertex(10, 0, 0, 255, 0), Vertex(10, 10, 0, 255, 0),
     };
 
-    int buffer_id = vk_context->create_vertex_buffer(vertex_data);
+    std::vector<ObjectData> object_data = {
+        ObjectData(0, 0), ObjectData(20, 20),
+        ObjectData(40, 40), ObjectData(60, 60),
+        ObjectData(80, 80),
+    };
+
+    int vertex_buffer_id = vk_context->create_vertex_buffer(vertex_data);
+    int object_buffer_id = vk_context->create_object_position_buffer(object_data);
 
     bool running = true;
 
@@ -142,7 +147,7 @@ int main() {
                     break;
             }
         }
-        draw_frame(vk_context, buffer_id, vertex_data.size());
+        draw_frame(vk_context, vertex_buffer_id, object_buffer_id);
     }
     
     return 0;
